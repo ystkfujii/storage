@@ -28,6 +28,8 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/conversion"
+	"k8s.io/apimachinery/pkg/fields"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/watch"
@@ -751,47 +753,102 @@ func (s *StorageImpl) GetListWithConn(ctx context.Context, conn *sqlite.Conn, ke
 		return fmt.Errorf("need ptr to slice: %v", err)
 	}
 	// set default limit
-	if opts.Predicate.Limit == 0 {
-		opts.Predicate.Limit = 500
+	limit := opts.Predicate.Limit
+	if limit == 0 {
+		limit = 500
 	}
-	// prepare SQLite connection
-	var list []string
-	var last string
-	if opts.ResourceVersion == softwarecomposition.ResourceVersionFullSpec {
-		// get names from SQLite
-		list, last, err = listMetadataKeys(conn, key, opts.Predicate.Continue, opts.Predicate.Limit)
-		if err != nil {
-			logger.L().Ctx(ctx).Error("GetList - list keys failed", helpers.Error(err), helpers.String("key", key))
-		}
-		// populate list object
-		elem := v.Type().Elem()
-		v.Set(reflect.MakeSlice(v.Type(), 0, len(list)))
-		for _, k := range list {
-			obj := reflect.New(elem).Interface().(runtime.Object)
-			if err := s.get(ctx, conn, k, storage.GetOptions{}, obj, noLock); err != nil {
-				logger.L().Ctx(ctx).Error("GetList - get object failed", helpers.Error(err), helpers.String("key", k))
+
+	// populate list object
+	elem := v.Type().Elem()
+	v.Set(reflect.MakeSlice(v.Type(), 0, int(limit)))
+
+	last := ""
+	cursor := opts.Predicate.Continue
+	hasMore := false
+
+	for int64(v.Len()) < limit {
+		remaining := limit - int64(v.Len())
+
+		var scanned int
+		if opts.ResourceVersion == softwarecomposition.ResourceVersionFullSpec {
+			// get names from SQLite
+			list, pageLast, err := listMetadataKeys(conn, key, cursor, remaining)
+			if err != nil {
+				logger.L().Ctx(ctx).Error("GetList - list keys failed", helpers.Error(err), helpers.String("key", key))
 			}
-			v.Set(reflect.Append(v, reflect.ValueOf(obj).Elem()))
-		}
-	} else {
-		// get metadata from SQLite
-		list, last, err = listMetadata(conn, key, opts.Predicate.Continue, opts.Predicate.Limit)
-		if err != nil {
-			logger.L().Ctx(ctx).Error("GetList - list metadata failed", helpers.Error(err), helpers.String("key", key))
-		}
-		// populate list object
-		elem := v.Type().Elem()
-		v.Set(reflect.MakeSlice(v.Type(), 0, len(list)))
-		for _, metadataJSON := range list {
-			obj := reflect.New(elem).Interface().(runtime.Object)
-			if err := json.Unmarshal([]byte(metadataJSON), obj); err != nil {
-				logger.L().Ctx(ctx).Error("GetList - unmarshal metadata failed", helpers.Error(err), helpers.String("key", key))
+
+			scanned = len(list)
+			last = pageLast
+
+			for _, k := range list {
+				obj := reflect.New(elem).Interface().(runtime.Object)
+				if err := s.get(ctx, conn, k, storage.GetOptions{}, obj, noLock); err != nil {
+					logger.L().Ctx(ctx).Error("GetList - get object failed", helpers.Error(err), helpers.String("key", k))
+				}
+
+				matched, err := matchesSelectionPredicate(opts.Predicate, obj)
+				if err != nil {
+					logger.L().Ctx(ctx).Error("GetList - match selection predicate", helpers.Error(err))
+					continue
+				}
+				if !matched {
+					continue
+				}
+
+				v.Set(reflect.Append(v, reflect.ValueOf(obj).Elem()))
 			}
-			v.Set(reflect.Append(v, reflect.ValueOf(obj).Elem()))
+		} else {
+			// get metadata from SQLite
+			list, pageLast, err := listMetadata(conn, key, cursor, remaining)
+			if err != nil {
+				logger.L().Ctx(ctx).Error("GetList - list metadata failed", helpers.Error(err), helpers.String("key", key))
+			}
+
+			scanned = len(list)
+			last = pageLast
+
+			for _, metadataJSON := range list {
+				obj := reflect.New(elem).Interface().(runtime.Object)
+				if err := json.Unmarshal([]byte(metadataJSON), obj); err != nil {
+					logger.L().Ctx(ctx).Error("GetList - unmarshal metadata failed", helpers.Error(err), helpers.String("key", key))
+				}
+
+				matched, err := matchesSelectionPredicate(opts.Predicate, obj)
+				if err != nil {
+					logger.L().Ctx(ctx).Error("GetList - match selection predicate", helpers.Error(err))
+					continue
+				}
+				if !matched {
+					continue
+				}
+
+				v.Set(reflect.Append(v, reflect.ValueOf(obj).Elem()))
+			}
 		}
+
+		if scanned == 0 {
+			last = ""
+			hasMore = false
+			break
+		}
+
+		if int64(v.Len()) >= limit {
+			hasMore = true
+			break
+		}
+
+		if int64(scanned) < remaining {
+			last = ""
+			hasMore = false
+			break
+		}
+
+		cursor = last
+		hasMore = true
 	}
+
 	// eventually set list accessor fields
-	if len(list) == int(opts.Predicate.Limit) {
+	if hasMore && last != "" {
 		listAccessor, err := meta.ListAccessor(listObj)
 		if err != nil {
 			return fmt.Errorf("list accessor: %w", err)
@@ -1339,4 +1396,27 @@ func clearSpec(obj runtime.Object) {
 			f.Set(reflect.Zero(f.Type()))
 		}
 	}
+}
+
+func matchesSelectionPredicate(
+	predicate storage.SelectionPredicate,
+	obj runtime.Object,
+) (bool, error) {
+	if predicate.Label == nil && predicate.Field == nil {
+		return true, nil
+	}
+
+	if predicate.Label == nil {
+		predicate.Label = labels.Everything()
+	}
+
+	if predicate.Field == nil {
+		predicate.Field = fields.Everything()
+	}
+
+	if predicate.GetAttrs == nil {
+		return false, fmt.Errorf("selection predicate GetAttrs is nil")
+	}
+
+	return predicate.Matches(obj)
 }
