@@ -12,6 +12,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/fields"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apiserver/pkg/storage"
 	"zombiezen.com/go/sqlite/sqlitemigration"
 )
@@ -150,7 +152,13 @@ func TestGeneratedNetworkPolicyStorage_GetList_OnePolicyPerWorkload(t *testing.T
 	require.NoError(t, realStorage.Create(ctx, "/spdx.softwarecomposition.kubescape.io/containerprofile/kubescape/replicaset-redis-7c9f8d4b6-redis-5555-6666", redis, nil, 0))
 
 	list := &softwarecomposition.GeneratedNetworkPolicyList{}
-	opts := storage.ListOptions{Predicate: storage.SelectionPredicate{Limit: 500}}
+	opts := storage.ListOptions{
+		Predicate: storage.SelectionPredicate{
+			Field: fields.Everything(),
+			Label: labels.Everything(),
+			Limit: 500,
+		},
+	}
 	err := gnpStorage.GetList(ctx, "/spdx.softwarecomposition.kubescape.io/generatednetworkpolicies/kubescape", opts, list)
 	require.NoError(t, err)
 
@@ -206,7 +214,13 @@ func TestGeneratedNetworkPolicyStorage_ExcludesNonAvailableProfiles(t *testing.T
 
 	// GetList: only the two available workloads produce policies.
 	list := &softwarecomposition.GeneratedNetworkPolicyList{}
-	opts := storage.ListOptions{Predicate: storage.SelectionPredicate{Limit: 500}}
+	opts := storage.ListOptions{
+		Predicate: storage.SelectionPredicate{
+			Field: fields.Everything(),
+			Label: labels.Everything(),
+			Limit: 500,
+		},
+	}
 	require.NoError(t, gnpStorage.GetList(ctx, "/spdx.softwarecomposition.kubescape.io/generatednetworkpolicies/kubescape", opts, list))
 
 	names := map[string]bool{}

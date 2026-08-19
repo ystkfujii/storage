@@ -13,6 +13,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/fields"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apiserver/pkg/storage"
 	"zombiezen.com/go/sqlite/sqlitemigration"
@@ -144,6 +146,12 @@ func TestConfigurationScanSummaryStorage_GetList(t *testing.T) {
 			name: "no existing objects return empty list",
 			args: args{
 				key: "/spdx.softwarecomposition.kubescape.io/configurationscansummaries",
+				opts: storage.ListOptions{
+					Predicate: storage.SelectionPredicate{
+						Label: labels.Everything(),
+						Field: fields.Everything(),
+					},
+				},
 			},
 		},
 		{
@@ -151,6 +159,12 @@ func TestConfigurationScanSummaryStorage_GetList(t *testing.T) {
 			args: args{
 				key:    "/spdx.softwarecomposition.kubescape.io/configurationscansummaries",
 				objPtr: &v1beta1.ConfigurationScanSummaryList{},
+				opts: storage.ListOptions{
+					Predicate: storage.SelectionPredicate{
+						Label: labels.Everything(),
+						Field: fields.Everything(),
+					},
+				},
 			},
 			expectedError: nil,
 			create:        true,
@@ -254,7 +268,10 @@ func TestConfigurationScanSummaryStorage_GetList_Pagination(t *testing.T) {
 	// the aggregation reads severities from the spec, so request the full spec
 	err := configScanSummaryStorage.GetList(ctx, "/spdx.softwarecomposition.kubescape.io/configurationscansummaries", storage.ListOptions{
 		ResourceVersion: softwarecomposition.ResourceVersionFullSpec,
-		Predicate:       storage.SelectionPredicate{},
+		Predicate: storage.SelectionPredicate{
+			Label: labels.Everything(),
+			Field: fields.Everything(),
+		},
 	}, listObj)
 	require.NoError(t, err)
 

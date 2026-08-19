@@ -14,6 +14,8 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/fields"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apiserver/pkg/storage"
 )
@@ -186,7 +188,14 @@ func (s *GeneratedNetworkPolicyStorage) Get(ctx context.Context, key string, opt
 	requestedName := keyParts[len(keyParts)-1]
 	listKey := strings.Join(keyParts[:len(keyParts)-1], "/")
 
-	items, err := s.listNamespaceContainerProfiles(ctx, listKey, storage.ListOptions{Predicate: storage.SelectionPredicate{Limit: containerProfileListLimit}})
+	listOpt := storage.ListOptions{
+		Predicate: storage.SelectionPredicate{
+			Label: labels.Everything(),
+			Field: fields.Everything(),
+			Limit: containerProfileListLimit,
+		},
+	}
+	items, err := s.listNamespaceContainerProfiles(ctx, listKey, listOpt)
 	if err != nil {
 		return err
 	}

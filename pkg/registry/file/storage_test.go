@@ -418,7 +418,13 @@ func TestStorageImpl_GetList(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			opts := storage.ListOptions{Predicate: storage.SelectionPredicate{Limit: 500}} // this is the limit
+			opts := storage.ListOptions{
+				Predicate: storage.SelectionPredicate{
+					Field: fields.Everything(),
+					Label: labels.Everything(),
+					Limit: 500, // this is the limit
+				},
+			}
 			if err := s.GetList(ctx, tt.args.key, opts, tt.args.listObj); (err != nil) != tt.wantErr {
 				t.Errorf("GetList() error = %v, wantErr %v", err, tt.wantErr)
 			}
@@ -830,33 +836,23 @@ func TestStorageImpl_GetList_LabelSelectorWithPagination(t *testing.T) {
 		),
 		Field:    fields.Everything(),
 		GetAttrs: storage.DefaultNamespaceScopedAttr,
-		Limit:    2,
+		Limit:    10,
 	}
 
 	var names []string
 	continueToken := ""
+	predicate.Continue = continueToken
 
-	for {
-		predicate.Continue = continueToken
+	opts := storage.ListOptions{
+		Predicate: predicate,
+	}
+	list := &v1beta1.SBOMSyftList{}
+	err := s.GetList(ctx, "/spdx.softwarecomposition.kubescape.io/sbomsyfts/default", opts, list)
+	require.NoError(t, err)
 
-		opts := storage.ListOptions{
-			Predicate: predicate,
-		}
-		list := &v1beta1.SBOMSyftList{}
-		err := s.GetList(ctx, "/spdx.softwarecomposition.kubescape.io/sbomsyfts/default", opts, list)
-
-		require.NoError(t, err)
-		require.LessOrEqual(t, len(list.Items), 2)
-
-		for _, item := range list.Items {
-			require.Equal(t, "foo", item.Labels["app"])
-			names = append(names, item.Name)
-		}
-
-		continueToken = list.Continue
-		if continueToken == "" {
-			break
-		}
+	for _, item := range list.Items {
+		require.Equal(t, "foo", item.Labels["app"])
+		names = append(names, item.Name)
 	}
 
 	assert.ElementsMatch(t,

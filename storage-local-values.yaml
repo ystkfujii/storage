@@ -1,0 +1,37 @@
+clusterName: ks-storage
+
+configurations:
+  # ローカル検証なので PVC は不要
+  persistence: disable
+
+capabilities:
+  operator: disable
+
+  configurationScan: disable
+  continuousScan: disable
+  nodeScan: disable
+
+  nodeSbomGeneration: disable
+  scanEmbeddedSBOMs: disable
+  vulnerabilityScan: disable
+  relevancy: disable
+
+  runtimeObservability: disable
+  networkPolicyService: disable
+  networkEventsStreaming: disable
+  runtimeDetection: disable
+  malwareDetection: disable
+  nodeProfileService: disable
+  admissionController: disable
+  httpDetection: disable
+  seccompProfileService: disable
+
+  prometheusExporter: disable
+
+storage:
+  enabled: true
+
+  image:
+    repository: kubescape/storage
+    tag: dev
+    pullPolicy: Never
